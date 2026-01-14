@@ -14,7 +14,7 @@ export const options = {
     },
 };
 
-const API_SERVER = 'http://localhost:8080';
+const API_SERVER = 'http://192.168.55.114:8080';
 
 export function setup() {
     const startRes = http.post(`${API_SERVER}/benchmark/start?protocol=gRPC/Unary&testName=k6-grpc`);

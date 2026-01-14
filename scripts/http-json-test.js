@@ -15,7 +15,7 @@ export const options = {
     },
 };
 
-const API_SERVER = 'http://localhost:8080';
+const API_SERVER = 'http://192.168.55.114:8080';
 
 // 테스트 시작 전 벤치마크 시작
 export function setup() {
