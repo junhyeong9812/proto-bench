@@ -1,0 +1,22 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: dataServer
+
+grpc:
+  server:
+    port: 9091
+
+# 데이터 설정
+data:
+  payload-size-mb: 1
+  chunk-size-kb: 64
+
+# Actuator
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
