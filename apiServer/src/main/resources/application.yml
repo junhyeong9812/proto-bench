@@ -1,0 +1,21 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: apiServer
+
+# dataServer 연결 설정
+data-server:
+  http:
+    url: http://localhost:8081
+  grpc:
+    host: localhost
+    port: 9091
+
+# Actuator
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
