@@ -6,7 +6,7 @@ echo "================================"
 echo "Proto-Bench: HTTP vs gRPC 성능 테스트"
 echo "================================"
 
-API_SERVER="http://localhost:8080"
+API_SERVER="http://192.168.55.114:8080"
 RESULTS_DIR="../results"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 
