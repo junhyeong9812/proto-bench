@@ -6,7 +6,7 @@ echo "================================"
 echo "Phase 2: 소용량 페이로드 테스트"
 echo "================================"
 
-API_SERVER="${API_SERVER:-http://localhost:8080}"
+API_SERVER="${API_SERVER:-http://192.168.55.114:8080}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 RESULTS_DIR="$SCRIPT_DIR/../results/phase2"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
