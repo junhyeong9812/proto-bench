@@ -10,16 +10,28 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import org.springframework.stereotype.Service
 
+/**
+ * gRPC 데이터 서비스
+ *
+ * DataServiceGrpcKt.DataServiceCoroutineImplBase를 상속받아
+ * Unary RPC와 Server Streaming RPC를 구현한다.
+ */
 @Service
 class GrpcDataService(
     private val dataService: DataService
 ) : DataServiceGrpcKt.DataServiceCoroutineImplBase() {
 
     /**
-     * 단일 요청-응답: 1MB 데이터 한번에 전송
+     * Unary RPC: 단일 요청 → 단일 응답
+     *
+     * 클라이언트가 요청한 크기의 페이로드를 한 번에 전송한다.
+     *
+     * @param request 요청 (requestId, size 포함)
+     * @return DataResponse (전체 페이로드 포함)
      */
     override suspend fun getData(request: DataRequest): DataResponse {
-        val payload = dataService.getPayload()
+        val size = if (request.size.isNullOrEmpty()) "1mb" else request.size
+        val payload = dataService.getPayload(size)
 
         return DataResponse.newBuilder()
             .setRequestId(request.requestId)
@@ -30,10 +42,16 @@ class GrpcDataService(
     }
 
     /**
-     * 서버 스트리밍: 1MB 데이터를 청크로 나눠서 전송
+     * Server Streaming RPC: 단일 요청 → 다중 응답(스트림)
+     *
+     * 클라이언트가 요청한 크기의 페이로드를 64KB 청크로 나누어 스트리밍한다.
+     *
+     * @param request 요청 (requestId, size 포함)
+     * @return Flow<DataChunk> (청크 스트림)
      */
     override fun getDataStream(request: DataRequest): Flow<DataChunk> = flow {
-        val chunks = dataService.getChunks()
+        val size = if (request.size.isNullOrEmpty()) "1mb" else request.size
+        val chunks = dataService.getPayloadAsChunks(size)
         val totalChunks = chunks.size
 
         chunks.forEachIndexed { index, chunk ->
