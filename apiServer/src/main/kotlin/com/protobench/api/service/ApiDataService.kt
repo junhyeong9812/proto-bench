@@ -7,9 +7,6 @@ import kotlinx.coroutines.flow.toList
 import org.springframework.stereotype.Service
 import java.util.UUID
 
-/**
- * API 응답 DTO
- */
 data class ApiResponse(
     val requestId: String,
     val protocol: String,
@@ -18,7 +15,10 @@ data class ApiResponse(
 )
 
 /**
- * 데이터 요청 서비스 (HTTP/gRPC 선택)
+ * API 데이터 서비스
+ *
+ * HTTP/gRPC 클라이언트를 통해 dataServer에 요청하고,
+ * 벤치마크 메트릭을 수집한다.
  */
 @Service
 class ApiDataService(
@@ -28,14 +28,17 @@ class ApiDataService(
 ) {
 
     /**
-     * HTTP JSON으로 데이터 요청
+     * HTTP JSON 방식으로 데이터 요청
+     *
+     * @param size 페이로드 크기 (1kb, 10kb, 100kb, 1mb)
+     * @return ApiResponse
      */
-    suspend fun getDataHttpJson(): ApiResponse {
+    suspend fun getDataHttpJson(size: String = "1mb"): ApiResponse {
         val requestId = UUID.randomUUID().toString()
         val startNanos = System.nanoTime()
 
         return try {
-            val response = httpClient.getDataJson(requestId)
+            val response = httpClient.getDataJson(requestId, size)
             val latencyNanos = System.nanoTime() - startNanos
 
             benchmarkCollector.record(latencyNanos, response.payloadSize.toLong(), true)
@@ -54,14 +57,17 @@ class ApiDataService(
     }
 
     /**
-     * HTTP Binary로 데이터 요청
+     * HTTP Binary 방식으로 데이터 요청
+     *
+     * @param size 페이로드 크기 (1kb, 10kb, 100kb, 1mb)
+     * @return ApiResponse
      */
-    suspend fun getDataHttpBinary(): ApiResponse {
+    suspend fun getDataHttpBinary(size: String = "1mb"): ApiResponse {
         val requestId = UUID.randomUUID().toString()
         val startNanos = System.nanoTime()
 
         return try {
-            val response = httpClient.getDataBinary(requestId)
+            val response = httpClient.getDataBinary(requestId, size)
             val latencyNanos = System.nanoTime() - startNanos
 
             benchmarkCollector.record(latencyNanos, response.size.toLong(), true)
@@ -80,14 +86,17 @@ class ApiDataService(
     }
 
     /**
-     * gRPC Unary로 데이터 요청
+     * gRPC Unary 방식으로 데이터 요청
+     *
+     * @param size 페이로드 크기 (1kb, 10kb, 100kb, 1mb)
+     * @return ApiResponse
      */
-    suspend fun getDataGrpc(): ApiResponse {
+    suspend fun getDataGrpc(size: String = "1mb"): ApiResponse {
         val requestId = UUID.randomUUID().toString()
         val startNanos = System.nanoTime()
 
         return try {
-            val response = grpcClient.getData(requestId)
+            val response = grpcClient.getData(requestId, size)
             val latencyNanos = System.nanoTime() - startNanos
 
             benchmarkCollector.record(latencyNanos, response.payloadSize.toLong(), true)
@@ -106,14 +115,17 @@ class ApiDataService(
     }
 
     /**
-     * gRPC Streaming으로 데이터 요청
+     * gRPC Streaming 방식으로 데이터 요청
+     *
+     * @param size 페이로드 크기 (1kb, 10kb, 100kb, 1mb)
+     * @return ApiResponse
      */
-    suspend fun getDataGrpcStream(): ApiResponse {
+    suspend fun getDataGrpcStream(size: String = "1mb"): ApiResponse {
         val requestId = UUID.randomUUID().toString()
         val startNanos = System.nanoTime()
 
         return try {
-            val chunks = grpcClient.getDataStream(requestId).toList()
+            val chunks = grpcClient.getDataStream(requestId, size).toList()
             val latencyNanos = System.nanoTime() - startNanos
             val totalSize = chunks.sumOf { it.chunk.size() }
 

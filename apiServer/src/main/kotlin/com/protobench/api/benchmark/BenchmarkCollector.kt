@@ -6,18 +6,12 @@ import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
-/**
- * 개별 요청 메트릭
- */
 data class RequestMetric(
     val latencyNanos: Long,
     val responseBytes: Long,
     val timestamp: Long = System.currentTimeMillis()
 )
 
-/**
- * 벤치마크 결과
- */
 data class BenchmarkResult(
     val protocol: String,
     val testName: String,
@@ -55,6 +49,9 @@ data class DataTransferStats(
 
 /**
  * 벤치마크 메트릭 수집기
+ *
+ * 벤치마크 시작/종료 및 요청별 메트릭을 수집한다.
+ * JMX MXBean을 활용하여 힙 메모리, GC 정보도 수집한다.
  */
 @Component
 class BenchmarkCollector {
@@ -69,7 +66,6 @@ class BenchmarkCollector {
     private var protocol: String = ""
     private var testName: String = ""
 
-    // JMX MXBeans
     private val memoryMXBean = ManagementFactory.getMemoryMXBean()
     private val gcMXBeans = ManagementFactory.getGarbageCollectorMXBeans()
 
@@ -80,13 +76,16 @@ class BenchmarkCollector {
 
     /**
      * 벤치마크 시작
+     *
+     * @param protocol 테스트 프로토콜 이름 (HTTP/JSON, gRPC/Unary 등)
+     * @param testName 테스트 식별 이름
+     * @return 시작 상태 정보
      */
     fun start(protocol: String, testName: String = "default"): Map<String, Any> {
         if (isRunning.getAndSet(true)) {
             return mapOf("error" to "Benchmark already running")
         }
 
-        // 초기화
         metrics.clear()
         successCount.set(0)
         failCount.set(0)
@@ -95,7 +94,6 @@ class BenchmarkCollector {
         this.testName = testName
         this.startTime = System.currentTimeMillis()
 
-        // 시작 시점 메트릭
         startHeapUsed = memoryMXBean.heapMemoryUsage.used
         peakHeapUsed = startHeapUsed
         startGcCount = gcMXBeans.sumOf { it.collectionCount }
@@ -111,6 +109,10 @@ class BenchmarkCollector {
 
     /**
      * 요청 메트릭 기록
+     *
+     * @param latencyNanos 요청 지연 시간 (나노초)
+     * @param responseBytes 응답 크기 (바이트)
+     * @param success 성공 여부
      */
     fun record(latencyNanos: Long, responseBytes: Long, success: Boolean) {
         if (!isRunning.get()) return
@@ -122,7 +124,6 @@ class BenchmarkCollector {
             failCount.incrementAndGet()
         }
 
-        // Peak 힙 메모리 추적
         val currentHeap = memoryMXBean.heapMemoryUsage.used
         if (currentHeap > peakHeapUsed) {
             peakHeapUsed = currentHeap
@@ -131,6 +132,8 @@ class BenchmarkCollector {
 
     /**
      * 벤치마크 종료 및 결과 계산
+     *
+     * @return BenchmarkResult (null이면 벤치마크가 실행 중이 아님)
      */
     fun end(): BenchmarkResult? {
         if (!isRunning.getAndSet(false)) {
@@ -140,12 +143,10 @@ class BenchmarkCollector {
         endTime = System.currentTimeMillis()
         val durationMs = endTime - startTime
 
-        // 종료 시점 메트릭
         val endHeapUsed = memoryMXBean.heapMemoryUsage.used
         val endGcCount = gcMXBeans.sumOf { it.collectionCount }
         val endGcTime = gcMXBeans.sumOf { it.collectionTime }
 
-        // 레이턴시 계산
         val latencies = metrics.map { it.latencyNanos / 1_000_000.0 }.sorted()
         val totalBytes = metrics.sumOf { it.responseBytes }
 
@@ -186,7 +187,9 @@ class BenchmarkCollector {
     }
 
     /**
-     * 현재 상태 확인
+     * 현재 벤치마크 상태 조회
+     *
+     * @return 상태 정보 (실행 중 여부, 요청 수 등)
      */
     fun status(): Map<String, Any> {
         return mapOf(
