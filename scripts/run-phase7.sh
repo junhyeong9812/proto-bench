@@ -133,30 +133,62 @@ echo "✅ Phase 7 테스트 완료!"
 echo "결과 파일: $RESULTS_DIR/*_$TIMESTAMP.log"
 echo "============================================"
 
-# JSON 결과 파싱 함수
+# JSON 결과 파싱 함수 (k6 로그 포맷에 맞게 수정)
 parse_json_result() {
     local log_file="$1"
     local field="$2"
 
-    # "=== JSON RESULT ===" 다음 줄에서 JSON 추출
-    local json_line=$(grep -A1 "=== JSON RESULT ===" "$log_file" 2>/dev/null | tail -1)
+    # k6 로그에서 JSON RESULT 라인 찾기
+    # 형식: time="..." level=info msg="{\"protocol\":...}" source=console
+    # "=== JSON RESULT ===" 다음 줄에서 msg="..." 안의 JSON 추출
 
-    if [ -n "$json_line" ]; then
-        echo "$json_line" | python3 -c "
-import sys, json
+    python3 << EOF
+import re
+import json
+import sys
+
 try:
-    data = json.loads(sys.stdin.read())
-    fields = '$field'.split('.')
-    result = data
-    for f in fields:
-        result = result[f]
-    print(f'{result:.2f}' if isinstance(result, float) else result)
-except:
+    with open('$log_file', 'r') as f:
+        content = f.read()
+
+    # "=== JSON RESULT ===" 이후의 내용에서 msg="..." 패턴 찾기
+    # k6 로그 형식: msg="{\"protocol\":...}"
+    pattern = r'=== JSON RESULT ===.*?msg="(\{.*?\})"'
+    match = re.search(pattern, content, re.DOTALL)
+
+    if not match:
+        # 다른 형식 시도: msg='...' 또는 직접 JSON
+        pattern2 = r'=== JSON RESULT ===.*?level=info msg="(\{[^"]+\})"'
+        match = re.search(pattern2, content, re.DOTALL)
+
+    if not match:
+        # 이스케이프된 JSON 찾기
+        pattern3 = r'msg="(\{\\\"protocol\\\".*?\})"'
+        match = re.search(pattern3, content)
+
+    if match:
+        json_str = match.group(1)
+        # 이스케이프된 따옴표 복원
+        json_str = json_str.replace('\\"', '"')
+        json_str = json_str.replace('\\\\', '\\')
+
+        data = json.loads(json_str)
+
+        # 중첩 필드 접근
+        fields = '$field'.split('.')
+        result = data
+        for f in fields:
+            result = result[f]
+
+        if isinstance(result, float):
+            print(f'{result:.2f}')
+        else:
+            print(result)
+    else:
+        print('N/A')
+except Exception as e:
     print('N/A')
-" 2>/dev/null
-    else
-        echo "N/A"
-    fi
+EOF
 }
 
 # 결과 요약 출력
@@ -365,44 +397,60 @@ echo "[*] 전체 결과를 JSON으로 저장 중..."
 
 SUMMARY_FILE="$RESULTS_DIR/summary_$TIMESTAMP.json"
 
-echo "{" > "$SUMMARY_FILE"
-echo '  "timestamp": "'$TIMESTAMP'",' >> "$SUMMARY_FILE"
-echo '  "complexities": ['$(echo $COMPLEXITY_LIST | sed 's/ /", "/g' | sed 's/^/"/;s/$/"/')'],' >> "$SUMMARY_FILE"
-echo '  "results": {' >> "$SUMMARY_FILE"
+# Python을 사용하여 JSON 파일 생성
+python3 << EOF
+import re
+import json
+import os
 
-FIRST_COMPLEXITY=true
-for COMPLEXITY in $COMPLEXITY_LIST; do
-    if [ "$FIRST_COMPLEXITY" = true ]; then
-        FIRST_COMPLEXITY=false
-    else
-        echo ',' >> "$SUMMARY_FILE"
-    fi
+results_dir = "$RESULTS_DIR"
+timestamp = "$TIMESTAMP"
+complexity_list = "$COMPLEXITY_LIST".split()
 
-    echo '    "'$COMPLEXITY'": {' >> "$SUMMARY_FILE"
+def extract_json_from_log(log_file):
+    try:
+        with open(log_file, 'r') as f:
+            content = f.read()
 
-    for protocol in "http-json" "http-binary" "grpc-unary" "grpc-stream"; do
-        LOG_FILE="$RESULTS_DIR/${protocol}_${COMPLEXITY}_$TIMESTAMP.log"
-        JSON_DATA=$(grep -A1 "=== JSON RESULT ===" "$LOG_FILE" 2>/dev/null | tail -1)
+        # k6 로그에서 JSON 추출
+        pattern = r'msg="(\{\\\"protocol\\\".*?\})"'
+        match = re.search(pattern, content)
 
-        PROTOCOL_KEY=$(echo $protocol | tr '-' '_')
-        if [ -n "$JSON_DATA" ]; then
-            echo '      "'$PROTOCOL_KEY'": '$JSON_DATA >> "$SUMMARY_FILE"
-        else
-            echo '      "'$PROTOCOL_KEY'": null' >> "$SUMMARY_FILE"
-        fi
+        if match:
+            json_str = match.group(1)
+            json_str = json_str.replace('\\"', '"')
+            json_str = json_str.replace('\\\\', '\\\\')
+            return json.loads(json_str)
+    except Exception as e:
+        pass
+    return None
 
-        if [ "$protocol" != "grpc-stream" ]; then
-            # 마지막 콤마 추가
-            sed -i '$ s/$/,/' "$SUMMARY_FILE"
-        fi
-    done
+summary = {
+    "timestamp": timestamp,
+    "complexities": complexity_list,
+    "results": {}
+}
 
-    echo '    }' >> "$SUMMARY_FILE"
-done
+for complexity in complexity_list:
+    summary["results"][complexity] = {}
 
-echo '  }' >> "$SUMMARY_FILE"
-echo "}" >> "$SUMMARY_FILE"
+    protocols = [
+        ("http_json", "http-json"),
+        ("http_binary", "http-binary"),
+        ("grpc_unary", "grpc-unary"),
+        ("grpc_stream", "grpc-stream")
+    ]
 
-echo "✅ JSON 요약 저장: $SUMMARY_FILE"
+    for key, prefix in protocols:
+        log_file = os.path.join(results_dir, f"{prefix}_{complexity}_{timestamp}.log")
+        data = extract_json_from_log(log_file)
+        summary["results"][complexity][key] = data
+
+with open("$SUMMARY_FILE", 'w') as f:
+    json.dump(summary, f, indent=2)
+
+print(f"✅ JSON 요약 저장: $SUMMARY_FILE")
+EOF
+
 echo ""
 echo "=========================================="
