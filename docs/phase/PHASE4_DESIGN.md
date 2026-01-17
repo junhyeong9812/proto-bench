@@ -1,106 +1,112 @@
-# Phase 4: 복잡한 데이터 구조 직렬화 성능
+# Phase 4: 역전 포인트 탐색 (10KB ~ 1MB)
 
 ## 목적
 
-단순 byte[] 대신 복잡한 객체(여러 필드, 중첩 구조)를 전송할 때  
-JSON 파싱 vs Protobuf 파싱 성능 차이를 검증한다.
+Phase 1~2에서 확인된 결과:
+- **10KB**: gRPC가 43% 더 빠름
+- **1MB**: HTTP가 2배 더 빠름
+
+이 사이 어딘가에 **gRPC와 HTTP의 성능이 역전되는 지점**이 존재한다.  
+정확한 역전 포인트를 찾는다.
 
 ## 가설
 
-> "필드가 많고 중첩된 복잡한 객체에서는  
-> JSON 파싱 비용이 Protobuf보다 커서 gRPC가 유리할 것이다"
+> "페이로드 크기가 커질수록 Protobuf 직렬화 오버헤드가 증가하여  
+> 100KB ~ 500KB 사이에서 HTTP가 gRPC를 추월할 것이다"
 
-## 배경 지식
+## 배경
 
-### JSON 파싱
-- 텍스트 기반 → 문자열 파싱 필요
-- 키 이름 반복 전송 ("name": "value")
-- 동적 타입 → 런타임 타입 체크
+### 왜 역전이 발생하는가?
 
-### Protobuf 파싱
-- 바이너리 기반 → 직접 메모리 매핑
-- 필드 번호만 전송 (키 이름 없음)
-- 정적 타입 → 컴파일 타임 최적화
+**gRPC 오버헤드 요소:**
+- Protobuf 직렬화: `ByteString.copyFrom(payload)` - O(n) 복사
+- HTTP/2 프레이밍: 각 DATA 프레임마다 9바이트 헤더
+- 1MB = 62개 프레임 × 9B = 558B 추가 오버헤드
 
-## 테스트 데이터 구조
+**HTTP 오버헤드 요소:**
+- 텍스트 헤더: ~400B (고정)
+- JSON의 경우 Base64: 33% 크기 증가
 
-```protobuf
-message ComplexData {
-    string id = 1;
-    string name = 2;
-    int32 age = 3;
-    double score = 4;
-    bool is_active = 5;
-    repeated string tags = 6;           // 배열 (10개)
-    Address address = 7;                 // 중첩 객체
-    repeated Order orders = 8;           // 중첩 배열 (5개)
-    map<string, string> metadata = 9;    // 맵 (10쌍)
+**페이로드 크기별 오버헤드 비율:**
+
+| 크기 | HTTP 헤더 비율 | gRPC 직렬화 영향 |
+|-----|---------------|-----------------|
+| 10KB | 4% | 낮음 |
+| 50KB | 0.8% | 중간 |
+| 100KB | 0.4% | 높음 |
+| 500KB | 0.08% | 매우 높음 |
+| 1MB | 0.04% | 지배적 |
+
+## 테스트 매트릭스
+
+| 크기 | HTTP/Binary | gRPC/Unary | 예상 승자 |
+|-----|-------------|------------|----------|
+| 10KB | ✅ | ✅ | gRPC |
+| 50KB | ✅ | ✅ | ? |
+| 100KB | ✅ | ✅ | ? (역전 예상) |
+| 200KB | ✅ | ✅ | HTTP |
+| 500KB | ✅ | ✅ | HTTP |
+
+## 테스트 조건
+
+| 항목 | 값 |
+|------|-----|
+| 페이로드 크기 | 10KB → 50KB → 100KB → 200KB → 500KB |
+| 동시 사용자 (VU) | 10 |
+| 테스트 시간 | 각 30초 |
+| 테스트 대상 | HTTP/JSON, HTTP/Binary, gRPC/Unary, gRPC/Stream |
+
+## 코드 수정 필요
+
+### DataService.kt
+```kotlin
+companion object {
+    val PAYLOAD_SIZES = mapOf(
+        "1kb" to 1 * 1024,
+        "10kb" to 10 * 1024,
+        "50kb" to 50 * 1024,      // 추가
+        "100kb" to 100 * 1024,
+        "200kb" to 200 * 1024,    // 추가
+        "500kb" to 500 * 1024,    // 추가
+        "1mb" to 1 * 1024 * 1024
+    )
 }
-
-message Address {
-    string city = 1;
-    string street = 2;
-    string zipcode = 3;
-    string country = 4;
-}
-
-message Order {
-    string order_id = 1;
-    double amount = 2;
-    int64 timestamp = 3;
-    repeated Item items = 4;            // 이중 중첩 (3개)
-}
-
-message Item {
-    string product_id = 1;
-    string name = 2;
-    int32 quantity = 3;
-    double price = 4;
-}
-```
-
-## 테스트 시나리오
-
-| 시나리오 | 필드 수 | 중첩 깊이 | 배열 크기 |
-|---------|--------|----------|----------|
-| Simple | 5개 | 0 | 0 |
-| Medium | 15개 | 1 | 10 |
-| Complex | 50+개 | 2 | 10×5×3 |
-
-## 측정 포인트
-
-1. **직렬화 시간** - 객체 → 바이트 변환
-2. **역직렬화 시간** - 바이트 → 객체 변환
-3. **전송 크기** - 동일 데이터의 바이트 수
-4. **메모리 사용량** - 파싱 중 메모리 할당
-
-## 예상 결과
-
-| 복잡도 | HTTP/JSON | gRPC/Protobuf | 예상 |
-|--------|-----------|---------------|------|
-| Simple | 빠름 | 비슷 | HTTP ≈ gRPC |
-| Medium | 느려짐 | 유지 | gRPC 우위 |
-| Complex | 급락 | 약간 감소 | gRPC 압도 |
-
-### 크기 비교 예상
-
-```
-Simple 데이터:
-- JSON: ~200 bytes
-- Protobuf: ~100 bytes (50% 절감)
-
-Complex 데이터:
-- JSON: ~5KB
-- Protobuf: ~1.5KB (70% 절감)
 ```
 
 ## 실행 방법
 
 ```bash
 cd scripts
-./run-phase4.sh simple
-./run-phase4.sh medium
-./run-phase4.sh complex
+
+# 전체 실행
+./run-phase4.sh
+
+# 개별 크기 테스트
+SIZE_LIST="50kb 100kb" ./run-phase4.sh
+
+# 개별 스크립트 실행
+k6 run -e SIZE=100kb phase4/http-json-test.js
+k6 run -e SIZE=100kb phase4/http-binary-test.js
+k6 run -e SIZE=100kb phase4/grpc-test.js
+k6 run -e SIZE=100kb phase4/grpc-stream-test.js
+```
+
+## 예상 결과 그래프
+
+```
+Throughput (req/s)
+     ^
+     |     gRPC
+     |    /
+     |   /     HTTP
+     |  /     /
+     | /     /
+     |/     /
+     X─────────────────> 페이로드 크기
+     10KB  50KB  100KB  200KB  500KB  1MB
+           
+           ↑
+        역전 포인트
 ```
 
 ## 상태

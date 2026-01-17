@@ -17,7 +17,10 @@ class DataService {
         val PAYLOAD_SIZES = mapOf(
             "1kb" to 1 * 1024,
             "10kb" to 10 * 1024,
+            "50kb" to 50 * 1024,
             "100kb" to 100 * 1024,
+            "200kb" to 200 * 1024,
+            "500kb" to 500 * 1024,
             "1mb" to 1 * 1024 * 1024
         )
         const val CHUNK_SIZE = 64 * 1024
