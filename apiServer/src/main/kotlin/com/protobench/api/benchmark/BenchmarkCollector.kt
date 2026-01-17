@@ -5,6 +5,7 @@ import java.lang.management.ManagementFactory
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
+import com.sun.management.OperatingSystemMXBean
 
 data class RequestMetric(
     val latencyNanos: Long,
@@ -39,7 +40,12 @@ data class ServerMetrics(
     val endHeapMb: Double,
     val peakHeapMb: Double,
     val gcCount: Long,
-    val gcTimeMs: Long
+    val gcTimeMs: Long,
+    // CPU 관련 메트릭 추가
+    val avgCpuUsagePercent: Double,
+    val peakCpuUsagePercent: Double,
+    val avgProcessCpuPercent: Double,
+    val peakProcessCpuPercent: Double
 )
 
 data class DataTransferStats(
@@ -51,7 +57,7 @@ data class DataTransferStats(
  * 벤치마크 메트릭 수집기
  *
  * 벤치마크 시작/종료 및 요청별 메트릭을 수집한다.
- * JMX MXBean을 활용하여 힙 메모리, GC 정보도 수집한다.
+ * JMX MXBean을 활용하여 힙 메모리, GC 정보, CPU 사용량도 수집한다.
  */
 @Component
 class BenchmarkCollector {
@@ -68,11 +74,22 @@ class BenchmarkCollector {
 
     private val memoryMXBean = ManagementFactory.getMemoryMXBean()
     private val gcMXBeans = ManagementFactory.getGarbageCollectorMXBeans()
+    private val osMXBean = ManagementFactory.getOperatingSystemMXBean() as OperatingSystemMXBean
 
     private var startHeapUsed: Long = 0
     private var startGcCount: Long = 0
     private var startGcTime: Long = 0
     private var peakHeapUsed: Long = 0
+
+    // CPU 메트릭 저장용
+    private val cpuUsageSamples = ConcurrentLinkedQueue<Double>()
+    private val processCpuSamples = ConcurrentLinkedQueue<Double>()
+    @Volatile private var peakCpuUsage: Double = 0.0
+    @Volatile private var peakProcessCpu: Double = 0.0
+
+    // CPU 샘플링 스레드
+    @Volatile private var cpuSamplingThread: Thread? = null
+    @Volatile private var stopSampling = false
 
     /**
      * 벤치마크 시작
@@ -90,6 +107,13 @@ class BenchmarkCollector {
         successCount.set(0)
         failCount.set(0)
 
+        // CPU 메트릭 초기화
+        cpuUsageSamples.clear()
+        processCpuSamples.clear()
+        peakCpuUsage = 0.0
+        peakProcessCpu = 0.0
+        stopSampling = false
+
         this.protocol = protocol
         this.testName = testName
         this.startTime = System.currentTimeMillis()
@@ -98,6 +122,44 @@ class BenchmarkCollector {
         peakHeapUsed = startHeapUsed
         startGcCount = gcMXBeans.sumOf { it.collectionCount }
         startGcTime = gcMXBeans.sumOf { it.collectionTime }
+
+        // CPU 샘플링 스레드 시작 (100ms 간격)
+        cpuSamplingThread = Thread {
+            while (!stopSampling && isRunning.get()) {
+                try {
+                    // 시스템 전체 CPU 사용률 (0.0 ~ 1.0)
+                    val systemCpuLoad = osMXBean.cpuLoad
+                    // 현재 JVM 프로세스의 CPU 사용률 (0.0 ~ 1.0)
+                    val processCpuLoad = osMXBean.processCpuLoad
+
+                    if (systemCpuLoad >= 0) {
+                        val cpuPercent = systemCpuLoad * 100
+                        cpuUsageSamples.add(cpuPercent)
+                        if (cpuPercent > peakCpuUsage) {
+                            peakCpuUsage = cpuPercent
+                        }
+                    }
+
+                    if (processCpuLoad >= 0) {
+                        val processPercent = processCpuLoad * 100
+                        processCpuSamples.add(processPercent)
+                        if (processPercent > peakProcessCpu) {
+                            peakProcessCpu = processPercent
+                        }
+                    }
+
+                    Thread.sleep(100) // 100ms 간격으로 샘플링
+                } catch (e: InterruptedException) {
+                    break
+                } catch (e: Exception) {
+                    // 샘플링 실패 시 무시
+                }
+            }
+        }.apply {
+            name = "cpu-sampling-thread"
+            isDaemon = true
+            start()
+        }
 
         return mapOf(
             "status" to "started",
@@ -140,6 +202,12 @@ class BenchmarkCollector {
             return null
         }
 
+        // CPU 샘플링 스레드 종료
+        stopSampling = true
+        cpuSamplingThread?.interrupt()
+        cpuSamplingThread?.join(1000) // 최대 1초 대기
+        cpuSamplingThread = null
+
         endTime = System.currentTimeMillis()
         val durationMs = endTime - startTime
 
@@ -163,6 +231,15 @@ class BenchmarkCollector {
             LatencyStats(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
         }
 
+        // CPU 평균 계산
+        val avgCpuUsage = if (cpuUsageSamples.isNotEmpty()) {
+            cpuUsageSamples.average()
+        } else 0.0
+
+        val avgProcessCpu = if (processCpuSamples.isNotEmpty()) {
+            processCpuSamples.average()
+        } else 0.0
+
         return BenchmarkResult(
             protocol = protocol,
             testName = testName,
@@ -177,7 +254,11 @@ class BenchmarkCollector {
                 endHeapMb = endHeapUsed / (1024.0 * 1024.0),
                 peakHeapMb = peakHeapUsed / (1024.0 * 1024.0),
                 gcCount = endGcCount - startGcCount,
-                gcTimeMs = endGcTime - startGcTime
+                gcTimeMs = endGcTime - startGcTime,
+                avgCpuUsagePercent = avgCpuUsage,
+                peakCpuUsagePercent = peakCpuUsage,
+                avgProcessCpuPercent = avgProcessCpu,
+                peakProcessCpuPercent = peakProcessCpu
             ),
             dataTransfer = DataTransferStats(
                 totalBytes = totalBytes,
@@ -192,6 +273,9 @@ class BenchmarkCollector {
      * @return 상태 정보 (실행 중 여부, 요청 수 등)
      */
     fun status(): Map<String, Any> {
+        val currentCpuUsage = osMXBean.cpuLoad * 100
+        val currentProcessCpu = osMXBean.processCpuLoad * 100
+
         return mapOf(
             "isRunning" to isRunning.get(),
             "protocol" to protocol,
@@ -199,7 +283,9 @@ class BenchmarkCollector {
             "currentRequests" to (successCount.get() + failCount.get()),
             "successRequests" to successCount.get(),
             "failedRequests" to failCount.get(),
-            "elapsedMs" to if (isRunning.get()) System.currentTimeMillis() - startTime else 0
+            "elapsedMs" to if (isRunning.get()) System.currentTimeMillis() - startTime else 0,
+            "currentCpuUsagePercent" to if (currentCpuUsage >= 0) currentCpuUsage else 0.0,
+            "currentProcessCpuPercent" to if (currentProcessCpu >= 0) currentProcessCpu else 0.0
         )
     }
 
