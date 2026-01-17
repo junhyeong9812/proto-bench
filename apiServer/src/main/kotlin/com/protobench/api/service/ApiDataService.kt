@@ -15,10 +15,23 @@ data class ApiResponse(
 )
 
 /**
+ * Phase 5: 복잡한 데이터 API 응답
+ */
+data class ComplexApiResponse(
+    val requestId: String,
+    val protocol: String,
+    val complexity: String,
+    val serializedSize: Int,
+    val latencyMs: Double
+)
+
+/**
  * API 데이터 서비스
  *
  * HTTP/gRPC 클라이언트를 통해 dataServer에 요청하고,
  * 벤치마크 메트릭을 수집한다.
+ *
+ * Phase 5: 복잡한 데이터 구조 서비스 메서드 추가
  */
 @Service
 class ApiDataService(
@@ -135,6 +148,132 @@ class ApiDataService(
                 requestId = requestId,
                 protocol = "gRPC/Stream",
                 payloadSize = totalSize,
+                latencyMs = latencyNanos / 1_000_000.0
+            )
+        } catch (e: Exception) {
+            val latencyNanos = System.nanoTime() - startNanos
+            benchmarkCollector.record(latencyNanos, 0, false)
+            throw e
+        }
+    }
+
+    // ============================================
+    // Phase 5: 복잡한 데이터 구조 서비스
+    // ============================================
+
+    /**
+     * HTTP JSON 방식으로 복잡한 데이터 요청
+     *
+     * @param complexity 복잡도 (simple, medium, complex)
+     * @return ComplexApiResponse
+     */
+    suspend fun getComplexDataHttpJson(complexity: String = "simple"): ComplexApiResponse {
+        val requestId = UUID.randomUUID().toString()
+        val startNanos = System.nanoTime()
+
+        return try {
+            val response = httpClient.getComplexDataJson(requestId, complexity)
+            val latencyNanos = System.nanoTime() - startNanos
+
+            benchmarkCollector.record(latencyNanos, response.serializedSize.toLong(), true)
+
+            ComplexApiResponse(
+                requestId = requestId,
+                protocol = "HTTP/JSON",
+                complexity = complexity,
+                serializedSize = response.serializedSize,
+                latencyMs = latencyNanos / 1_000_000.0
+            )
+        } catch (e: Exception) {
+            val latencyNanos = System.nanoTime() - startNanos
+            benchmarkCollector.record(latencyNanos, 0, false)
+            throw e
+        }
+    }
+
+    /**
+     * HTTP Binary (Protobuf) 방식으로 복잡한 데이터 요청
+     *
+     * @param complexity 복잡도 (simple, medium, complex)
+     * @return ComplexApiResponse
+     */
+    suspend fun getComplexDataHttpBinary(complexity: String = "simple"): ComplexApiResponse {
+        val requestId = UUID.randomUUID().toString()
+        val startNanos = System.nanoTime()
+
+        return try {
+            val response = httpClient.getComplexDataBinary(requestId, complexity)
+            val latencyNanos = System.nanoTime() - startNanos
+
+            benchmarkCollector.record(latencyNanos, response.size.toLong(), true)
+
+            ComplexApiResponse(
+                requestId = requestId,
+                protocol = "HTTP/Binary(Protobuf)",
+                complexity = complexity,
+                serializedSize = response.size,
+                latencyMs = latencyNanos / 1_000_000.0
+            )
+        } catch (e: Exception) {
+            val latencyNanos = System.nanoTime() - startNanos
+            benchmarkCollector.record(latencyNanos, 0, false)
+            throw e
+        }
+    }
+
+    /**
+     * gRPC Unary 방식으로 복잡한 데이터 요청
+     *
+     * @param complexity 복잡도 (simple, medium, complex)
+     * @return ComplexApiResponse
+     */
+    suspend fun getComplexDataGrpc(complexity: String = "simple"): ComplexApiResponse {
+        val requestId = UUID.randomUUID().toString()
+        val startNanos = System.nanoTime()
+
+        return try {
+            val response = grpcClient.getComplexData(requestId, complexity)
+            val latencyNanos = System.nanoTime() - startNanos
+
+            benchmarkCollector.record(latencyNanos, response.serializedSize.toLong(), true)
+
+            ComplexApiResponse(
+                requestId = requestId,
+                protocol = "gRPC/Unary",
+                complexity = complexity,
+                serializedSize = response.serializedSize,
+                latencyMs = latencyNanos / 1_000_000.0
+            )
+        } catch (e: Exception) {
+            val latencyNanos = System.nanoTime() - startNanos
+            benchmarkCollector.record(latencyNanos, 0, false)
+            throw e
+        }
+    }
+
+    /**
+     * gRPC Stream 방식으로 복잡한 데이터 요청
+     *
+     * 복잡한 데이터는 청크로 나누지 않고 Unary와 동일하게 처리한다.
+     *
+     * @param complexity 복잡도 (simple, medium, complex)
+     * @return ComplexApiResponse
+     */
+    suspend fun getComplexDataGrpcStream(complexity: String = "simple"): ComplexApiResponse {
+        val requestId = UUID.randomUUID().toString()
+        val startNanos = System.nanoTime()
+
+        return try {
+            val response = grpcClient.getComplexData(requestId, complexity)
+            val latencyNanos = System.nanoTime() - startNanos
+
+            benchmarkCollector.record(latencyNanos, response.serializedSize.toLong(), true)
+
+            ComplexApiResponse(
+                requestId = requestId,
+                protocol = "gRPC/Stream",
+                complexity = complexity,
+                serializedSize = response.serializedSize,
                 latencyMs = latencyNanos / 1_000_000.0
             )
         } catch (e: Exception) {

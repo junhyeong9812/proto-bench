@@ -1,9 +1,6 @@
 package com.protobench.api.client
 
-import com.protobench.proto.DataRequest
-import com.protobench.proto.DataResponse
-import com.protobench.proto.DataChunk
-import com.protobench.proto.DataServiceGrpcKt
+import com.protobench.proto.*
 import io.grpc.ManagedChannel
 import io.grpc.ManagedChannelBuilder
 import jakarta.annotation.PostConstruct
@@ -17,6 +14,8 @@ import java.util.concurrent.TimeUnit
  * dataServer gRPC 클라이언트
  *
  * gRPC 채널을 통해 dataServer의 gRPC 서비스를 호출한다.
+ *
+ * Phase 5: 복잡한 데이터 구조 요청 메서드 추가
  */
 @Component
 class GrpcDataClient(
@@ -92,5 +91,25 @@ class GrpcDataClient(
             .build()
 
         return stub.getDataStream(request)
+    }
+
+    // ============================================
+    // Phase 5: 복잡한 데이터 구조 요청
+    // ============================================
+
+    /**
+     * 복잡한 데이터 요청 (gRPC Unary)
+     *
+     * @param requestId 요청 ID
+     * @param complexity 복잡도 (simple, medium, complex)
+     * @return ComplexDataResponse
+     */
+    suspend fun getComplexData(requestId: String, complexity: String = "simple"): ComplexDataResponse {
+        val request = ComplexDataRequest.newBuilder()
+            .setRequestId(requestId)
+            .setComplexity(complexity)
+            .build()
+
+        return stub.getComplexData(request)
     }
 }
