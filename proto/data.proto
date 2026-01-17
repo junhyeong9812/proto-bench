@@ -6,10 +6,14 @@ option java_multiple_files = true;
 option java_package = "com.protobench.proto";
 option java_outer_classname = "DataProto";
 
+// ============================================
+// Phase 1-4: 기존 메시지
+// ============================================
+
 // 데이터 요청
 message DataRequest {
   string request_id = 1;
-  string size = 2;        // [Phase 2 추가] 페이로드 크기 (1kb, 10kb, 100kb, 1mb)
+  string size = 2;        // 페이로드 크기 (1kb, 10kb, 100kb, 1mb)
 }
 
 // 데이터 응답
@@ -29,8 +33,113 @@ message DataChunk {
   bool is_last = 5;
 }
 
+// ============================================
+// Phase 5: 복잡한 데이터 구조
+// ============================================
+
+// 복잡도 레벨 요청
+message ComplexDataRequest {
+  string request_id = 1;
+  string complexity = 2;  // simple, medium, complex
+}
+
+// 아이템 (이중 중첩용)
+message Item {
+  string product_id = 1;
+  string name = 2;
+  int32 quantity = 3;
+  double price = 4;
+}
+
+// 주문 (중첩 배열용)
+message Order {
+  string order_id = 1;
+  double amount = 2;
+  int64 timestamp = 3;
+  repeated Item items = 4;  // 이중 중첩 (3개)
+}
+
+// 주소 (중첩 객체용)
+message Address {
+  string city = 1;
+  string street = 2;
+  string zipcode = 3;
+  string country = 4;
+}
+
+// Simple 데이터 (필드 5개, 중첩 없음)
+message SimpleData {
+  string id = 1;
+  string name = 2;
+  int32 age = 3;
+  double score = 4;
+  bool is_active = 5;
+}
+
+// Medium 데이터 (필드 15개, 중첩 1단계)
+message MediumData {
+  string id = 1;
+  string name = 2;
+  int32 age = 3;
+  double score = 4;
+  bool is_active = 5;
+  string email = 6;
+  string phone = 7;
+  int64 created_at = 8;
+  int64 updated_at = 9;
+  string status = 10;
+  repeated string tags = 11;      // 배열 (10개)
+  Address address = 12;           // 중첩 객체
+  map<string, string> metadata = 13;  // 맵 (5쌍)
+}
+
+// Complex 데이터 (필드 50+개, 중첩 2단계)
+message ComplexData {
+  string id = 1;
+  string name = 2;
+  int32 age = 3;
+  double score = 4;
+  bool is_active = 5;
+  string email = 6;
+  string phone = 7;
+  int64 created_at = 8;
+  int64 updated_at = 9;
+  string status = 10;
+  repeated string tags = 11;          // 배열 (10개)
+  Address address = 12;               // 중첩 객체
+  Address billing_address = 13;       // 중첩 객체 2
+  repeated Order orders = 14;         // 중첩 배열 (5개 × 3아이템)
+  map<string, string> metadata = 15;  // 맵 (10쌍)
+  map<string, int32> scores = 16;     // 맵 (5쌍)
+  repeated string permissions = 17;   // 배열 (10개)
+  repeated Address addresses = 18;    // 중첩 배열 (3개)
+  string description = 19;
+  string notes = 20;
+}
+
+// Complex 데이터 응답
+message ComplexDataResponse {
+  string request_id = 1;
+  int64 timestamp = 2;
+  int32 serialized_size = 3;
+
+  // 복잡도에 따라 하나만 설정됨
+  oneof data {
+    SimpleData simple = 10;
+    MediumData medium = 11;
+    ComplexData complex = 12;
+  }
+}
+
+// ============================================
 // 데이터 서비스
+// ============================================
+
 service DataService {
+  // Phase 1-4: 기존 RPC
   rpc GetData(DataRequest) returns (DataResponse);
   rpc GetDataStream(DataRequest) returns (stream DataChunk);
+
+  // Phase 5: 복잡한 데이터 RPC
+  rpc GetComplexData(ComplexDataRequest) returns (ComplexDataResponse);
 }
