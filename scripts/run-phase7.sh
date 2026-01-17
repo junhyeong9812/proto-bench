@@ -3,25 +3,6 @@
 # =============================================================================
 # Phase 7: 극한 복잡도에서의 역전 포인트 탐색 (CPU 사용량 측정 포함)
 # =============================================================================
-#
-# 목적: Phase 6에서 발견한 역전 현상을 CPU 사용량과 함께 분석하여,
-#       프로토콜별 CPU 효율성을 비교한다.
-#
-# 가설: "gRPC/Protobuf는 극한 복잡도에서 빌더 객체 생성으로 인해
-#        JSON보다 더 많은 CPU를 사용할 것이다"
-#
-# 측정 항목:
-#   - Throughput (req/s)
-#   - Latency (avg, p95)
-#   - CPU Usage (avg, peak) - 시스템 전체
-#   - Process CPU (avg, peak) - JVM 프로세스
-#   - Memory (heap, gc)
-#
-# 복잡도:
-#   - ultra: ~150필드, 3단계 중첩, ~200회 빌더 호출
-#   - extreme: ~500필드, 4단계 중첩, ~800회 빌더 호출
-#
-# =============================================================================
 
 echo "============================================"
 echo "Phase 7: CPU 사용량 포함 성능 분석"
@@ -32,7 +13,6 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 RESULTS_DIR="$SCRIPT_DIR/../results/phase7"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 
-# 테스트할 복잡도 목록 (기본: ultra와 extreme만)
 COMPLEXITY_LIST="${COMPLEXITY_LIST:-ultra extreme}"
 
 mkdir -p $RESULTS_DIR
@@ -69,11 +49,8 @@ echo "✅ 워밍업 완료"
 
 # 테스트 카운터
 TOTAL_TESTS=$(echo $COMPLEXITY_LIST | wc -w)
-TOTAL_TESTS=$((TOTAL_TESTS * 4))  # HTTP/JSON, HTTP/Binary, gRPC/Unary, gRPC/Stream
+TOTAL_TESTS=$((TOTAL_TESTS * 4))
 CURRENT_TEST=0
-
-# 결과 저장용 배열
-declare -A RESULTS
 
 # 각 복잡도별 테스트
 for COMPLEXITY in $COMPLEXITY_LIST; do
@@ -82,7 +59,6 @@ for COMPLEXITY in $COMPLEXITY_LIST; do
     echo "         ${COMPLEXITY} 복잡도 테스트"
     echo "=========================================="
 
-    # HTTP/JSON 테스트
     CURRENT_TEST=$((CURRENT_TEST + 1))
     echo ""
     echo "[$CURRENT_TEST/$TOTAL_TESTS] HTTP/JSON - ${COMPLEXITY} 테스트..."
@@ -91,9 +67,8 @@ for COMPLEXITY in $COMPLEXITY_LIST; do
         -e COMPLEXITY=$COMPLEXITY \
         -e API_SERVER=$API_SERVER \
         "$SCRIPT_DIR/phase7/http-json-test.js" 2>&1 | tee "$LOG_FILE"
-    sleep 5  # 극한 복잡도이므로 쿨다운 시간 증가
+    sleep 5
 
-    # HTTP/Binary (Protobuf) 테스트
     CURRENT_TEST=$((CURRENT_TEST + 1))
     echo ""
     echo "[$CURRENT_TEST/$TOTAL_TESTS] HTTP/Binary - ${COMPLEXITY} 테스트..."
@@ -104,7 +79,6 @@ for COMPLEXITY in $COMPLEXITY_LIST; do
         "$SCRIPT_DIR/phase7/http-binary-test.js" 2>&1 | tee "$LOG_FILE"
     sleep 5
 
-    # gRPC/Unary 테스트
     CURRENT_TEST=$((CURRENT_TEST + 1))
     echo ""
     echo "[$CURRENT_TEST/$TOTAL_TESTS] gRPC/Unary - ${COMPLEXITY} 테스트..."
@@ -115,7 +89,6 @@ for COMPLEXITY in $COMPLEXITY_LIST; do
         "$SCRIPT_DIR/phase7/grpc-test.js" 2>&1 | tee "$LOG_FILE"
     sleep 5
 
-    # gRPC/Stream 테스트
     CURRENT_TEST=$((CURRENT_TEST + 1))
     echo ""
     echo "[$CURRENT_TEST/$TOTAL_TESTS] gRPC/Stream - ${COMPLEXITY} 테스트..."
@@ -133,62 +106,64 @@ echo "✅ Phase 7 테스트 완료!"
 echo "결과 파일: $RESULTS_DIR/*_$TIMESTAMP.log"
 echo "============================================"
 
-# JSON 결과 파싱 함수 (k6 로그 포맷에 맞게 수정)
-parse_json_result() {
-    local log_file="$1"
-    local field="$2"
-
-    # k6 로그에서 JSON RESULT 라인 찾기
-    # 형식: time="..." level=info msg="{\"protocol\":...}" source=console
-    # "=== JSON RESULT ===" 다음 줄에서 msg="..." 안의 JSON 추출
-
-    python3 << EOF
+# JSON 파싱용 Python 스크립트를 별도 파일로 생성
+PARSER_SCRIPT=$(mktemp)
+cat > "$PARSER_SCRIPT" << 'PYTHON_EOF'
 import re
 import json
 import sys
 
-try:
-    with open('$log_file', 'r') as f:
-        content = f.read()
+def extract_json_from_log(log_file, field):
+    try:
+        with open(log_file, 'r') as f:
+            content = f.read()
 
-    # "=== JSON RESULT ===" 이후의 내용에서 msg="..." 패턴 찾기
-    # k6 로그 형식: msg="{\"protocol\":...}"
-    pattern = r'=== JSON RESULT ===.*?msg="(\{.*?\})"'
-    match = re.search(pattern, content, re.DOTALL)
+        # k6 로그에서 JSON 추출: msg="{\"protocol\":...}"
+        # 패턴: "protocol" 키워드가 포함된 JSON 객체
+        for line in content.split('\n'):
+            if '"protocol"' not in line:
+                continue
 
-    if not match:
-        # 다른 형식 시도: msg='...' 또는 직접 JSON
-        pattern2 = r'=== JSON RESULT ===.*?level=info msg="(\{[^"]+\})"'
-        match = re.search(pattern2, content, re.DOTALL)
+            # msg="..." 부분 추출
+            match = re.search(r'msg="(\{.*?\})"', line)
+            if match:
+                json_str = match.group(1)
+                # 이스케이프된 따옴표 복원
+                json_str = json_str.replace('\\"', '"')
 
-    if not match:
-        # 이스케이프된 JSON 찾기
-        pattern3 = r'msg="(\{\\\"protocol\\\".*?\})"'
-        match = re.search(pattern3, content)
+                try:
+                    data = json.loads(json_str)
 
-    if match:
-        json_str = match.group(1)
-        # 이스케이프된 따옴표 복원
-        json_str = json_str.replace('\\"', '"')
-        json_str = json_str.replace('\\\\', '\\')
+                    # 중첩 필드 접근
+                    fields = field.split('.')
+                    result = data
+                    for f in fields:
+                        result = result[f]
 
-        data = json.loads(json_str)
+                    if isinstance(result, float):
+                        print(f'{result:.2f}')
+                    else:
+                        print(result)
+                    return
+                except json.JSONDecodeError:
+                    continue
 
-        # 중첩 필드 접근
-        fields = '$field'.split('.')
-        result = data
-        for f in fields:
-            result = result[f]
+        print('N/A')
+    except Exception as e:
+        print('N/A')
 
-        if isinstance(result, float):
-            print(f'{result:.2f}')
-        else:
-            print(result)
+if __name__ == '__main__':
+    if len(sys.argv) >= 3:
+        extract_json_from_log(sys.argv[1], sys.argv[2])
     else:
         print('N/A')
-except Exception as e:
-    print('N/A')
-EOF
+PYTHON_EOF
+
+# 파싱 함수
+parse_json_result() {
+    local log_file="$1"
+    local field="$2"
+    python3 "$PARSER_SCRIPT" "$log_file" "$field"
 }
 
 # 결과 요약 출력
@@ -206,19 +181,16 @@ for COMPLEXITY in $COMPLEXITY_LIST; do
     GRPC_UNARY_LOG="$RESULTS_DIR/grpc-unary_${COMPLEXITY}_$TIMESTAMP.log"
     GRPC_STREAM_LOG="$RESULTS_DIR/grpc-stream_${COMPLEXITY}_$TIMESTAMP.log"
 
-    # Throughput 추출
     HTTP_JSON_RPS=$(parse_json_result "$HTTP_JSON_LOG" "throughputRps")
     HTTP_BINARY_RPS=$(parse_json_result "$HTTP_BINARY_LOG" "throughputRps")
     GRPC_UNARY_RPS=$(parse_json_result "$GRPC_UNARY_LOG" "throughputRps")
     GRPC_STREAM_RPS=$(parse_json_result "$GRPC_STREAM_LOG" "throughputRps")
 
-    # Latency P95 추출
     HTTP_JSON_P95=$(parse_json_result "$HTTP_JSON_LOG" "latency.p95Ms")
     HTTP_BINARY_P95=$(parse_json_result "$HTTP_BINARY_LOG" "latency.p95Ms")
     GRPC_UNARY_P95=$(parse_json_result "$GRPC_UNARY_LOG" "latency.p95Ms")
     GRPC_STREAM_P95=$(parse_json_result "$GRPC_STREAM_LOG" "latency.p95Ms")
 
-    # JSON vs gRPC/Unary 비교
     WINNER="N/A"
     if [ "$HTTP_JSON_RPS" != "N/A" ] && [ "$GRPC_UNARY_RPS" != "N/A" ]; then
         HTTP_INT=$(echo "$HTTP_JSON_RPS" | cut -d. -f1)
@@ -260,7 +232,6 @@ for COMPLEXITY in $COMPLEXITY_LIST; do
     GRPC_UNARY_LOG="$RESULTS_DIR/grpc-unary_${COMPLEXITY}_$TIMESTAMP.log"
     GRPC_STREAM_LOG="$RESULTS_DIR/grpc-stream_${COMPLEXITY}_$TIMESTAMP.log"
 
-    # CPU 메트릭 추출
     HTTP_JSON_AVG_CPU=$(parse_json_result "$HTTP_JSON_LOG" "serverMetrics.avgCpuUsagePercent")
     HTTP_JSON_PEAK_CPU=$(parse_json_result "$HTTP_JSON_LOG" "serverMetrics.peakCpuUsagePercent")
     HTTP_JSON_AVG_PROC=$(parse_json_result "$HTTP_JSON_LOG" "serverMetrics.avgProcessCpuPercent")
@@ -302,7 +273,6 @@ for COMPLEXITY in $COMPLEXITY_LIST; do
     GRPC_UNARY_LOG="$RESULTS_DIR/grpc-unary_${COMPLEXITY}_$TIMESTAMP.log"
     GRPC_STREAM_LOG="$RESULTS_DIR/grpc-stream_${COMPLEXITY}_$TIMESTAMP.log"
 
-    # Memory 메트릭 추출
     HTTP_JSON_HEAP=$(parse_json_result "$HTTP_JSON_LOG" "serverMetrics.peakHeapMb")
     HTTP_JSON_GC=$(parse_json_result "$HTTP_JSON_LOG" "serverMetrics.gcCount")
 
@@ -315,10 +285,10 @@ for COMPLEXITY in $COMPLEXITY_LIST; do
     GRPC_STREAM_HEAP=$(parse_json_result "$GRPC_STREAM_LOG" "serverMetrics.peakHeapMb")
     GRPC_STREAM_GC=$(parse_json_result "$GRPC_STREAM_LOG" "serverMetrics.gcCount")
 
-    printf "| %-7s | HTTP/JSON  | %10s | %8s |\n" "$COMPLEXITY" "${HTTP_JSON_HEAP}MB" "$HTTP_JSON_GC"
-    printf "| %-7s | HTTP/Binary| %10s | %8s |\n" "" "${HTTP_BINARY_HEAP}MB" "$HTTP_BINARY_GC"
-    printf "| %-7s | gRPC/Unary | %10s | %8s |\n" "" "${GRPC_UNARY_HEAP}MB" "$GRPC_UNARY_GC"
-    printf "| %-7s | gRPC/Stream| %10s | %8s |\n" "" "${GRPC_STREAM_HEAP}MB" "$GRPC_STREAM_GC"
+    printf "| %-7s | HTTP/JSON  | %8sMB | %8s |\n" "$COMPLEXITY" "$HTTP_JSON_HEAP" "$HTTP_JSON_GC"
+    printf "| %-7s | HTTP/Binary| %8sMB | %8s |\n" "" "$HTTP_BINARY_HEAP" "$HTTP_BINARY_GC"
+    printf "| %-7s | gRPC/Unary | %8sMB | %8s |\n" "" "$GRPC_UNARY_HEAP" "$GRPC_UNARY_GC"
+    printf "| %-7s | gRPC/Stream| %8sMB | %8s |\n" "" "$GRPC_STREAM_HEAP" "$GRPC_STREAM_GC"
     echo "|---------|------------|------------|----------|"
 done
 
@@ -352,7 +322,6 @@ for COMPLEXITY in $COMPLEXITY_LIST; do
 
         EFFICIENCY="N/A"
         if [ "$RPS" != "N/A" ] && [ "$AVG_CPU" != "N/A" ]; then
-            # 소수점 계산
             EFFICIENCY=$(python3 -c "
 rps = float('$RPS')
 cpu = float('$AVG_CPU')
@@ -364,13 +333,16 @@ else:
         fi
 
         if [ "$protocol" = "HTTP/JSON" ]; then
-            printf "| %-7s | %-10s | %10s | %7s | %15s |\n" "$COMPLEXITY" "$protocol" "$RPS" "$AVG_CPU" "$EFFICIENCY"
+            printf "| %-7s | %-11s | %10s | %7s | %15s |\n" "$COMPLEXITY" "$protocol" "$RPS" "$AVG_CPU" "$EFFICIENCY"
         else
-            printf "| %-7s | %-10s | %10s | %7s | %15s |\n" "" "$protocol" "$RPS" "$AVG_CPU" "$EFFICIENCY"
+            printf "|         | %-11s | %10s | %7s | %15s |\n" "$protocol" "$RPS" "$AVG_CPU" "$EFFICIENCY"
         fi
     done
     echo "|---------|------------|------------|---------|-----------------|"
 done
+
+# 임시 파일 정리
+rm -f "$PARSER_SCRIPT"
 
 echo ""
 echo "=========================================="
@@ -391,66 +363,77 @@ echo "   - 빌더 객체 생성 오버헤드가 CPU 사용량 증가의 주 원�
 echo ""
 echo "=========================================="
 
-# JSON 형식으로 전체 결과 저장
+# JSON 요약 저장
 echo ""
 echo "[*] 전체 결과를 JSON으로 저장 중..."
-
 SUMMARY_FILE="$RESULTS_DIR/summary_$TIMESTAMP.json"
 
-# Python을 사용하여 JSON 파일 생성
-python3 << EOF
+# JSON 요약용 Python 스크립트
+SUMMARY_SCRIPT=$(mktemp)
+cat > "$SUMMARY_SCRIPT" << 'SUMMARY_PYTHON_EOF'
 import re
 import json
+import sys
 import os
-
-results_dir = "$RESULTS_DIR"
-timestamp = "$TIMESTAMP"
-complexity_list = "$COMPLEXITY_LIST".split()
 
 def extract_json_from_log(log_file):
     try:
         with open(log_file, 'r') as f:
             content = f.read()
 
-        # k6 로그에서 JSON 추출
-        pattern = r'msg="(\{\\\"protocol\\\".*?\})"'
-        match = re.search(pattern, content)
+        for line in content.split('\n'):
+            if '"protocol"' not in line:
+                continue
 
-        if match:
-            json_str = match.group(1)
-            json_str = json_str.replace('\\"', '"')
-            json_str = json_str.replace('\\\\', '\\\\')
-            return json.loads(json_str)
+            match = re.search(r'msg="(\{.*?\})"', line)
+            if match:
+                json_str = match.group(1)
+                json_str = json_str.replace('\\"', '"')
+
+                try:
+                    return json.loads(json_str)
+                except json.JSONDecodeError:
+                    continue
+
+        return None
     except Exception as e:
-        pass
-    return None
+        return None
 
-summary = {
-    "timestamp": timestamp,
-    "complexities": complexity_list,
-    "results": {}
-}
+if __name__ == '__main__':
+    results_dir = sys.argv[1]
+    timestamp = sys.argv[2]
+    complexity_list = sys.argv[3].split()
+    output_file = sys.argv[4]
 
-for complexity in complexity_list:
-    summary["results"][complexity] = {}
+    summary = {
+        "timestamp": timestamp,
+        "complexities": complexity_list,
+        "results": {}
+    }
 
-    protocols = [
-        ("http_json", "http-json"),
-        ("http_binary", "http-binary"),
-        ("grpc_unary", "grpc-unary"),
-        ("grpc_stream", "grpc-stream")
-    ]
+    for complexity in complexity_list:
+        summary["results"][complexity] = {}
 
-    for key, prefix in protocols:
-        log_file = os.path.join(results_dir, f"{prefix}_{complexity}_{timestamp}.log")
-        data = extract_json_from_log(log_file)
-        summary["results"][complexity][key] = data
+        protocols = [
+            ("http_json", "http-json"),
+            ("http_binary", "http-binary"),
+            ("grpc_unary", "grpc-unary"),
+            ("grpc_stream", "grpc-stream")
+        ]
 
-with open("$SUMMARY_FILE", 'w') as f:
-    json.dump(summary, f, indent=2)
+        for key, prefix in protocols:
+            log_file = os.path.join(results_dir, f"{prefix}_{complexity}_{timestamp}.log")
+            data = extract_json_from_log(log_file)
+            summary["results"][complexity][key] = data
 
-print(f"✅ JSON 요약 저장: $SUMMARY_FILE")
-EOF
+    with open(output_file, 'w') as f:
+        json.dump(summary, f, indent=2)
+
+    print(f"✅ JSON 요약 저장: {output_file}")
+SUMMARY_PYTHON_EOF
+
+python3 "$SUMMARY_SCRIPT" "$RESULTS_DIR" "$TIMESTAMP" "$COMPLEXITY_LIST" "$SUMMARY_FILE"
+rm -f "$SUMMARY_SCRIPT"
 
 echo ""
 echo "=========================================="
