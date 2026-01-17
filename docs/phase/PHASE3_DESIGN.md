@@ -58,12 +58,20 @@ HTTP/2 기반 gRPC의 멀티플렉싱이 얼마나 효과적인지 검증한다.
 
 ```bash
 cd scripts
-./run-phase3.sh 50
-./run-phase3.sh 100
-./run-phase3.sh 200
-./run-phase3.sh 500
+
+# 전체 실행 (50, 100, 200, 500 VU)
+./run-phase3.sh
+
+# 개별 VU 테스트
+VU_LIST="50" ./run-phase3.sh
+VU_LIST="100" ./run-phase3.sh
+VU_LIST="200" ./run-phase3.sh
+VU_LIST="500" ./run-phase3.sh
+
+# 개별 스크립트 실행
+k6 run -e VUS=100 -e SIZE=10kb phase3/grpc-test.js
 ```
 
 ## 상태
 
-📋 **예정**
+🔄 **준비 완료**
