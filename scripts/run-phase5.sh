@@ -133,39 +133,49 @@ for COMPLEXITY in $COMPLEXITY_LIST; do
     GRPC_UNARY_LOG="$RESULTS_DIR/grpc-unary_${COMPLEXITY}_$TIMESTAMP.log"
     GRPC_STREAM_LOG="$RESULTS_DIR/grpc-stream_${COMPLEXITY}_$TIMESTAMP.log"
 
-    # Throughput 추출 (BENCHMARK RESULT 섹션에서)
-    HTTP_JSON_RPS=$(grep "Throughput:" "$HTTP_JSON_LOG" 2>/dev/null | tail -1 | awk '{print $2}')
-    HTTP_BINARY_RPS=$(grep "Throughput:" "$HTTP_BINARY_LOG" 2>/dev/null | tail -1 | awk '{print $2}')
-    GRPC_UNARY_RPS=$(grep "Throughput:" "$GRPC_UNARY_LOG" 2>/dev/null | tail -1 | awk '{print $2}')
-    GRPC_STREAM_RPS=$(grep "Throughput:" "$GRPC_STREAM_LOG" 2>/dev/null | tail -1 | awk '{print $2}')
+    # Throughput 추출 (k6 로그 포맷: level=info msg="Throughput: 3601.55 req/s")
+    # grep -oP로 숫자만 추출
+    HTTP_JSON_RPS=$(grep "Throughput:" "$HTTP_JSON_LOG" 2>/dev/null | tail -1 | grep -oP '\d+\.\d+' | head -1)
+    HTTP_BINARY_RPS=$(grep "Throughput:" "$HTTP_BINARY_LOG" 2>/dev/null | tail -1 | grep -oP '\d+\.\d+' | head -1)
+    GRPC_UNARY_RPS=$(grep "Throughput:" "$GRPC_UNARY_LOG" 2>/dev/null | tail -1 | grep -oP '\d+\.\d+' | head -1)
+    GRPC_STREAM_RPS=$(grep "Throughput:" "$GRPC_STREAM_LOG" 2>/dev/null | tail -1 | grep -oP '\d+\.\d+' | head -1)
+
+    # 값이 없으면 N/A로 설정
+    HTTP_JSON_RPS="${HTTP_JSON_RPS:-N/A}"
+    HTTP_BINARY_RPS="${HTTP_BINARY_RPS:-N/A}"
+    GRPC_UNARY_RPS="${GRPC_UNARY_RPS:-N/A}"
+    GRPC_STREAM_RPS="${GRPC_STREAM_RPS:-N/A}"
 
     # JSON vs gRPC/Unary 비교
-    if [ -n "$HTTP_JSON_RPS" ] && [ -n "$GRPC_UNARY_RPS" ]; then
+    WINNER="N/A"
+    if [ "$HTTP_JSON_RPS" != "N/A" ] && [ "$GRPC_UNARY_RPS" != "N/A" ]; then
+        # 소수점 제거하여 정수로 변환
         HTTP_INT=$(echo "$HTTP_JSON_RPS" | cut -d. -f1)
         GRPC_INT=$(echo "$GRPC_UNARY_RPS" | cut -d. -f1)
 
-        if [ "$HTTP_INT" -gt 0 ] && [ "$GRPC_INT" -gt 0 ]; then
-            if [ "$GRPC_INT" -gt "$HTTP_INT" ]; then
-                DIFF=$(( (GRPC_INT - HTTP_INT) * 100 / HTTP_INT ))
-                WINNER="gRPC +${DIFF}%"
-            elif [ "$HTTP_INT" -gt "$GRPC_INT" ]; then
-                DIFF=$(( (HTTP_INT - GRPC_INT) * 100 / GRPC_INT ))
-                WINNER="JSON +${DIFF}%"
-            else
-                WINNER="동일"
+        # 정수 검증 후 비교
+        if [[ "$HTTP_INT" =~ ^[0-9]+$ ]] && [[ "$GRPC_INT" =~ ^[0-9]+$ ]]; then
+            if [ "$HTTP_INT" -gt 0 ] && [ "$GRPC_INT" -gt 0 ]; then
+                if [ "$GRPC_INT" -gt "$HTTP_INT" ]; then
+                    DIFF=$(( (GRPC_INT - HTTP_INT) * 100 / HTTP_INT ))
+                    WINNER="gRPC +${DIFF}%"
+                elif [ "$HTTP_INT" -gt "$GRPC_INT" ]; then
+                    DIFF=$(( (HTTP_INT - GRPC_INT) * 100 / GRPC_INT ))
+                    WINNER="JSON +${DIFF}%"
+                else
+                    WINNER="동일"
+                fi
             fi
-        else
-            WINNER="N/A"
         fi
-
-        printf "| %s | %s | %s | %s | %s | %s |\n" \
-            "$COMPLEXITY" \
-            "${HTTP_JSON_RPS:-N/A}" \
-            "${HTTP_BINARY_RPS:-N/A}" \
-            "${GRPC_UNARY_RPS:-N/A}" \
-            "${GRPC_STREAM_RPS:-N/A}" \
-            "$WINNER"
     fi
+
+    printf "| %-6s | %9s | %11s | %10s | %11s | %12s |\n" \
+        "$COMPLEXITY" \
+        "$HTTP_JSON_RPS" \
+        "$HTTP_BINARY_RPS" \
+        "$GRPC_UNARY_RPS" \
+        "$GRPC_STREAM_RPS" \
+        "$WINNER"
 done
 
 echo ""
@@ -173,13 +183,12 @@ echo "=========================================="
 echo "         크기 비교 (예상)"
 echo "=========================================="
 echo ""
-echo "| 복잡도 | JSON 예상 크기 | Protobuf 예상 크기 | 절감률 |"
-echo "|--------|---------------|-------------------|--------|"
-echo "| simple | ~150 bytes    | ~50 bytes         | ~67%   |"
-echo "| medium | ~800 bytes    | ~300 bytes        | ~63%   |"
-echo "| complex| ~5,000 bytes  | ~1,500 bytes      | ~70%   |"
+echo "| 복잡도  | JSON 예상 크기 | Protobuf 예상 크기 | 절감률 |"
+echo "|---------|---------------|-------------------|--------|"
+echo "| simple  | ~150 bytes    | ~50 bytes         | ~67%   |"
+echo "| medium  | ~800 bytes    | ~300 bytes        | ~63%   |"
+echo "| complex | ~5,000 bytes  | ~1,500 bytes      | ~70%   |"
 echo ""
 echo "=========================================="
 echo "※ Protobuf는 필드명을 전송하지 않아 복잡한 구조에서 더 효율적"
 echo "=========================================="
-```

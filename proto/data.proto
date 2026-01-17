@@ -121,7 +121,7 @@ message ComplexData {
 message ComplexDataResponse {
   string request_id = 1;
   int64 timestamp = 2;
-  int32 serialized_size = 3;
+  int32 response_size = 3;
 
   // 복잡도에 따라 하나만 설정됨
   oneof data {

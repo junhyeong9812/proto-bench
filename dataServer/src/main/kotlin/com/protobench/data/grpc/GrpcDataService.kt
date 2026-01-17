@@ -118,7 +118,7 @@ class GrpcDataService(
         return ComplexDataResponse.newBuilder()
             .setRequestId(requestId)
             .setTimestamp(timestamp)
-            .setSerializedSize(response.serializedSize)
+            .setResponseSize(response.serializedSize)
             .setSimple(simpleData)
             .build()
     }
@@ -160,7 +160,7 @@ class GrpcDataService(
         return ComplexDataResponse.newBuilder()
             .setRequestId(requestId)
             .setTimestamp(timestamp)
-            .setSerializedSize(response.serializedSize)
+            .setResponseSize(response.serializedSize)
             .setMedium(mediumData)
             .build()
     }
@@ -207,7 +207,7 @@ class GrpcDataService(
         return ComplexDataResponse.newBuilder()
             .setRequestId(requestId)
             .setTimestamp(timestamp)
-            .setSerializedSize(response.serializedSize)
+            .setResponseSize(response.serializedSize)
             .setComplex(complexData)
             .build()
     }
