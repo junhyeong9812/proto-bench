@@ -10,13 +10,11 @@ option java_outer_classname = "DataProto";
 // Phase 1-4: 기존 메시지
 // ============================================
 
-// 데이터 요청
 message DataRequest {
   string request_id = 1;
-  string size = 2;        // 페이로드 크기 (1kb, 10kb, 100kb, 1mb)
+  string size = 2;
 }
 
-// 데이터 응답
 message DataResponse {
   string request_id = 1;
   bytes payload = 2;
@@ -24,7 +22,6 @@ message DataResponse {
   int32 payload_size = 4;
 }
 
-// 스트리밍용 청크 응답
 message DataChunk {
   string request_id = 1;
   bytes chunk = 2;
@@ -37,13 +34,11 @@ message DataChunk {
 // Phase 5: 복잡한 데이터 구조
 // ============================================
 
-// 복잡도 레벨 요청
 message ComplexDataRequest {
   string request_id = 1;
-  string complexity = 2;  // simple, medium, complex
+  string complexity = 2;  // simple, medium, complex, ultra, extreme
 }
 
-// 아이템 (이중 중첩용)
 message Item {
   string product_id = 1;
   string name = 2;
@@ -51,15 +46,13 @@ message Item {
   double price = 4;
 }
 
-// 주문 (중첩 배열용)
 message Order {
   string order_id = 1;
   double amount = 2;
   int64 timestamp = 3;
-  repeated Item items = 4;  // 이중 중첩 (3개)
+  repeated Item items = 4;
 }
 
-// 주소 (중첩 객체용)
 message Address {
   string city = 1;
   string street = 2;
@@ -67,7 +60,6 @@ message Address {
   string country = 4;
 }
 
-// Simple 데이터 (필드 5개, 중첩 없음)
 message SimpleData {
   string id = 1;
   string name = 2;
@@ -76,7 +68,6 @@ message SimpleData {
   bool is_active = 5;
 }
 
-// Medium 데이터 (필드 15개, 중첩 1단계)
 message MediumData {
   string id = 1;
   string name = 2;
@@ -88,12 +79,11 @@ message MediumData {
   int64 created_at = 8;
   int64 updated_at = 9;
   string status = 10;
-  repeated string tags = 11;      // 배열 (10개)
-  Address address = 12;           // 중첩 객체
-  map<string, string> metadata = 13;  // 맵 (5쌍)
+  repeated string tags = 11;
+  Address address = 12;
+  map<string, string> metadata = 13;
 }
 
-// Complex 데이터 (필드 50+개, 중첩 2단계)
 message ComplexData {
   string id = 1;
   string name = 2;
@@ -105,29 +95,258 @@ message ComplexData {
   int64 created_at = 8;
   int64 updated_at = 9;
   string status = 10;
-  repeated string tags = 11;          // 배열 (10개)
-  Address address = 12;               // 중첩 객체
-  Address billing_address = 13;       // 중첩 객체 2
-  repeated Order orders = 14;         // 중첩 배열 (5개 × 3아이템)
-  map<string, string> metadata = 15;  // 맵 (10쌍)
-  map<string, int32> scores = 16;     // 맵 (5쌍)
-  repeated string permissions = 17;   // 배열 (10개)
-  repeated Address addresses = 18;    // 중첩 배열 (3개)
+  repeated string tags = 11;
+  Address address = 12;
+  Address billing_address = 13;
+  repeated Order orders = 14;
+  map<string, string> metadata = 15;
+  map<string, int32> scores = 16;
+  repeated string permissions = 17;
+  repeated Address addresses = 18;
   string description = 19;
   string notes = 20;
 }
 
-// Complex 데이터 응답
+// ============================================
+// Phase 6: Ultra/Extreme 데이터 구조
+// ============================================
+
+// --- Ultra용 메시지 (3단계 중첩) ---
+
+message Contact {
+  string name = 1;
+  string phone = 2;
+  string email = 3;
+  string role = 4;
+}
+
+message AddressWithContacts {
+  string city = 1;
+  string street = 2;
+  string zipcode = 3;
+  string country = 4;
+  repeated Contact contacts = 5;  // 2단계 중첩
+}
+
+message Attribute {
+  string key = 1;
+  string value = 2;
+  string type = 3;
+}
+
+message ItemWithAttributes {
+  string product_id = 1;
+  string name = 2;
+  int32 quantity = 3;
+  double price = 4;
+  repeated Attribute attributes = 5;  // 3단계 중첩
+}
+
+message OrderWithAttributes {
+  string order_id = 1;
+  double amount = 2;
+  int64 timestamp = 3;
+  string status = 4;
+  repeated ItemWithAttributes items = 5;  // 2단계 중첩
+}
+
+message Subcategory {
+  string id = 1;
+  string name = 2;
+  repeated string items = 3;
+}
+
+message Category {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  repeated Subcategory subcategories = 4;  // 3단계 중첩
+}
+
+message Change {
+  string field = 1;
+  string old_value = 2;
+  string new_value = 3;
+}
+
+message HistoryEntry {
+  string id = 1;
+  int64 timestamp = 2;
+  string action = 3;
+  repeated Change changes = 4;  // 3단계 중첩
+}
+
+message UltraData {
+  // 기본 필드 15개
+  string id = 1;
+  string name = 2;
+  int32 age = 3;
+  double score = 4;
+  bool is_active = 5;
+  string email = 6;
+  string phone = 7;
+  int64 created_at = 8;
+  int64 updated_at = 9;
+  string status = 10;
+  int32 priority = 11;
+  int32 level = 12;
+  double rating = 13;
+  bool verified = 14;
+  bool premium = 15;
+
+  // 배열/맵
+  repeated string tags = 20;
+  repeated string permissions = 21;
+  map<string, string> metadata = 22;
+  map<string, int32> scores = 23;
+
+  // 2단계 중첩
+  repeated AddressWithContacts addresses = 30;
+  repeated OrderWithAttributes orders = 31;
+
+  // 3단계 중첩
+  repeated Category categories = 40;
+  repeated HistoryEntry history = 41;
+
+  string description = 50;
+  string notes = 51;
+}
+
+// --- Extreme용 메시지 (4단계 중첩) ---
+
+message AttributeValue {
+  string value = 1;
+  string label = 2;
+  bool is_default = 3;
+}
+
+message AttributeWithValues {
+  string key = 1;
+  string type = 2;
+  repeated AttributeValue values = 3;  // 4단계 중첩
+}
+
+message ExtremeItem {
+  string product_id = 1;
+  string name = 2;
+  int32 quantity = 3;
+  double price = 4;
+  repeated AttributeWithValues attributes = 5;  // 3단계 중첩
+}
+
+message ExtremeOrder {
+  string order_id = 1;
+  double amount = 2;
+  int64 timestamp = 3;
+  string status = 4;
+  int32 priority = 5;
+  repeated ExtremeItem items = 6;  // 2단계 중첩
+}
+
+message Member {
+  string id = 1;
+  string name = 2;
+  string role = 3;
+  string email = 4;
+}
+
+message Team {
+  string id = 1;
+  string name = 2;
+  repeated Member members = 3;  // 4단계 중첩
+}
+
+message Department {
+  string id = 1;
+  string name = 2;
+  double budget = 3;
+  repeated Team teams = 4;  // 3단계 중첩
+}
+
+message Organization {
+  string id = 1;
+  string name = 2;
+  string type = 3;
+  repeated Department departments = 4;  // 2단계 중첩
+}
+
+message Role {
+  string id = 1;
+  string name = 2;
+  repeated string permissions = 3;
+}
+
+message Participant {
+  string id = 1;
+  string name = 2;
+  string email = 3;
+  repeated Role roles = 4;  // 4단계 중첩
+}
+
+message Event {
+  string id = 1;
+  string name = 2;
+  int64 timestamp = 3;
+  string location = 4;
+  repeated Participant participants = 5;  // 3단계 중첩
+}
+
+message ExtremeData {
+  // 기본 필드 20개
+  string id = 1;
+  string name = 2;
+  int32 age = 3;
+  double score = 4;
+  bool is_active = 5;
+  string email = 6;
+  string phone = 7;
+  int64 created_at = 8;
+  int64 updated_at = 9;
+  string status = 10;
+  int32 priority = 11;
+  int32 level = 12;
+  double rating = 13;
+  bool verified = 14;
+  bool premium = 15;
+  string tier = 16;
+  string region = 17;
+  string language = 18;
+  string currency = 19;
+  string timezone = 20;
+
+  // 대량 배열/맵
+  repeated string tags = 30;
+  repeated string permissions = 31;
+  map<string, string> metadata = 32;
+  map<string, int32> scores = 33;
+
+  // 2단계 중첩
+  repeated AddressWithContacts addresses = 40;
+
+  // 3단계 중첩
+  repeated ExtremeOrder orders = 50;
+
+  // 4단계 중첩
+  repeated Organization organizations = 60;
+  repeated Event events = 61;
+
+  string description = 70;
+  string notes = 71;
+  string additional_info = 72;
+}
+
+// Complex 데이터 응답 (Phase 6 확장)
 message ComplexDataResponse {
   string request_id = 1;
   int64 timestamp = 2;
   int32 response_size = 3;
 
-  // 복잡도에 따라 하나만 설정됨
   oneof data {
     SimpleData simple = 10;
     MediumData medium = 11;
     ComplexData complex = 12;
+    UltraData ultra = 13;      // Phase 6
+    ExtremeData extreme = 14;  // Phase 6
   }
 }
 
@@ -136,10 +355,7 @@ message ComplexDataResponse {
 // ============================================
 
 service DataService {
-  // Phase 1-4: 기존 RPC
   rpc GetData(DataRequest) returns (DataResponse);
   rpc GetDataStream(DataRequest) returns (stream DataChunk);
-
-  // Phase 5: 복잡한 데이터 RPC
   rpc GetComplexData(ComplexDataRequest) returns (ComplexDataResponse);
 }
